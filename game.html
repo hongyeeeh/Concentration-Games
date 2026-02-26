@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>星空專注力挑戰 - 社博版</title>
+    <script src="https://webgazer.cs.brown.edu/webgazer.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #050a10; color: white; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; }
+        
+        /* 標題畫面 */
+        #overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(5,10,16,0.9); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        h1 { font-size: 3.5rem; letter-spacing: 8px; color: #00d2ff; text-shadow: 0 0 20px #00d2ff; margin-bottom: 10px; }
+        
+        /* 目標點樣式 */
+        .target { width: 40px; height: 40px; background: radial-gradient(circle, #fff 10%, #00d2ff 60%, transparent 100%); box-shadow: 0 0 30px #00d2ff; border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; }
+        
+        /* 校準點 */
+        .calib-point { width: 25px; height: 25px; background: #ff4757; border-radius: 50%; position: absolute; cursor: pointer; border: 3px solid white; z-index: 1100; transition: transform 0.2s; }
+        .calib-point:hover { transform: scale(1.3); }
+
+        #msg { font-size: 1.5rem; margin: 20px; color: #ccc; }
+        #score-board { position: fixed; bottom: 20px; width: 100%; text-align: center; font-size: 2rem; display: none; }
+        button { padding: 15px 40px; font-size: 1.2rem; background: transparent; border: 2px solid #00d2ff; color: #00d2ff; cursor: pointer; transition: 0.3s; }
+        button:hover { background: #00d2ff; color: black; }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <h1 id="title-text">星空專注力挑戰</h1>
+    <p id="msg">載入中...請稍後</p>
+    <button id="mainBtn" onclick="startSetup()">開始初始化</button>
+</div>
+
+<div class="target" id="mainTarget"></div>
+<div id="score-board">專注能量: <span id="scoreText">100</span>%</div>
+
+
+
+<script>
+        // 強制覆蓋 window.alert，讓 WebGazer 無法跳出 HTTPS 警告
+    window.alert = (function(oldAlert) {
+        return function(msg) {
+            if (msg.includes("WebGazer works only over https")) return; // 攔截特定訊息
+            oldAlert(msg);
+        };
+    })(window.alert);
+    let score = 100;
+    let isTesting = false;
+    let calibCount = 0;
+
+    // 校準點位置 (百分比)
+    const pts = [
+        {t:'10%', l:'10%'}, {t:'10%', l:'90%'}, 
+        {t:'50%', l:'50%'}, 
+        {t:'90%', l:'10%'}, {t:'90%', l:'90%'}
+    ];
+
+    async function startSetup() {
+    // 1. UI 反饋
+    const msg = document.getElementById('msg');
+    const mainBtn = document.getElementById('mainBtn');
+    mainBtn.style.display = 'none';
+    msg.innerText = "正在喚醒星空感測儀... (若持續無反應請點擊重新啟動)";
+
+    // 2. 設定啟動參數
+    webgazer.params.showVideo = true; 
+
+    // 3. 執行啟動 (移除 .catch 的失敗 UI，改用超時判定)
+    webgazer.setRegression('ridge')
+        .setGazeListener((data, elapsed) => {
+            if (data == null) return;
+            if (isTesting) checkFocus(data.x, data.y);
+        })
+        .begin();
+
+    // 4. 暴力監測：不看 begin() 是否回傳 error，直接看 webgazer 是否真的跑起來了
+    let checkTimer = setInterval(() => {
+        const video = document.getElementById('webgazerVideoFeed');
+        // 如果影片元素出現了，且 WebGazer 狀態是 ready
+        if (video && webgazer.isReady()) {
+            clearInterval(checkTimer);
+            console.log("偵測到 WebGazer 核心已啟動");
+            
+            webgazer.showVideoPreview(true).showPredictionPoints(true);
+            msg.innerText = "感測儀啟動成功！";
+            
+            setTimeout(createCalibration, 1500);
+        }
+    }, 1000);
+
+    // 如果 10 秒後都還沒跑起來，再顯示重新啟動
+    setTimeout(() => {
+        if (!webgazer.isReady()) {
+            msg.innerText = "感測儀啟動過久，請確認上方鏡頭是否有畫面，或點擊重新啟動";
+            mainBtn.style.display = 'block';
+            mainBtn.innerText = "重新啟動";
+        }
+    }, 10000);
+}
+
+    // 建立校準點：解決紅點不動的核心步驟
+    function createCalibration() {
+        document.getElementById('msg').innerText = "請依序點擊紅色星火，並同時盯著它看";
+        
+        if (calibCount < pts.length) {
+            const p = document.createElement('div');
+            p.className = 'calib-point';
+            p.style.top = pts[calibCount].t;
+            p.style.left = pts[calibCount].l;
+            p.onclick = () => {
+                p.remove();
+                calibCount++;
+                createCalibration();
+            };
+            document.body.appendChild(p);
+        } else {
+            startChallenge();
+        }
+    }
+
+    function startChallenge() {
+        document.getElementById('overlay').style.display = 'none';
+        document.getElementById('mainTarget').style.display = 'block';
+        document.getElementById('score-board').style.display = 'block';
+        isTesting = true;
+
+        // 20秒後結算
+        setTimeout(finishGame, 20000);
+    }
+
+    function checkFocus(gx, gy) {
+        const target = document.getElementById('mainTarget').getBoundingClientRect();
+        const tx = target.left + 20;
+        const ty = target.top + 20;
+        const dist = Math.sqrt(Math.pow(gx-tx, 2) + Math.pow(gy-ty, 2));
+
+        if (dist > 150) { // 視線偏離中心超過 150px
+            score = Math.max(0, score - 0.5);
+            document.getElementById('scoreText').innerText = Math.floor(score);
+            document.getElementById('scoreText').style.color = 'red';
+        } else {
+            document.getElementById('scoreText').style.color = '#00ff00';
+        }
+    }
+
+    function finishGame() {
+        isTesting = false;
+        webgazer.pause();
+        let rank = "";
+        let animal = "";
+
+        if (score > 85) { rank = "SSS"; animal = "🦅 蒼穹老鷹 (眼神殺手！)"; }
+        else if (score > 60) { rank = "A"; animal = "🐈 好奇小貓 (容易被誘惑)"; }
+        else { rank = "B"; animal = "🦥 慵懶樹懶 (你睡著了嗎？)"; }
+
+        document.getElementById('overlay').style.display = 'flex';
+        document.getElementById('title-text').innerText = "挑戰結束！";
+        document.getElementById('msg').innerHTML = `專注評分：${rank}<br>你的靈魂特質是：${animal}`;
+        document.getElementById('mainBtn').style.display = 'block';
+        document.getElementById('mainBtn').innerText = "再試一次";
+        document.getElementById('mainBtn').onclick = () => location.reload();
+    }
+</script>
+</body>
+</html>
