@@ -1,25 +1,94 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <title>星空專注力挑戰 - 靈魂掃描版</title>
-    <script src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"></script>
-    <style>
-        body { margin: 0; background: #050a10; color: white; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; }
-        #overlay { position: fixed; inset: 0; background: rgba(5,16,30,0.95); z-index: 1000; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
-        .calib-point { width: 40px; height: 40px; background: #ff4757; border-radius: 50%; position: absolute; cursor: pointer; border: 3px solid white; z-index: 1100; display: none; }
-        .target { width: 60px; height: 60px; background: radial-gradient(circle, #fff, #00d2ff); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; box-shadow: 0 0 40px #00d2ff; transition: transform 0.1s; }
-        #score-board { position: fixed; bottom: 40px; width: 100%; text-align: center; font-size: 2.5rem; display: none; }
-        #hint-text { font-size: 1.2rem; color: #00d2ff; margin-top: 10px; height: 1.5em; text-shadow: 0 0 10px #00d2ff; }
-        button { padding: 15px 35px; font-size: 1.2rem; background: #00d2ff; border: none; border-radius: 50px; cursor: pointer; font-weight: bold; box-shadow: 0 0 20px rgba(0,210,255,0.5); }
-    </style>
+<meta charset="UTF-8">
+<title>專注力追蹤挑戰</title>
+<script src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"></script>
+
+<style>
+body{
+    margin:0;
+    background:#050a10;
+    color:white;
+    font-family:"Microsoft JhengHei",sans-serif;
+    overflow:hidden;
+}
+
+#overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(5,16,30,0.92);
+    z-index:1000;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+}
+
+.big-grade{
+    font-size:5rem;
+    font-weight:bold;
+    text-shadow:0 0 25px #00d2ff;
+}
+
+.animal{
+    font-size:3rem;
+    margin-top:10px;
+}
+
+.calib-point{
+    width:40px;
+    height:40px;
+    background:#ff4757;
+    border-radius:50%;
+    position:absolute;
+    cursor:pointer;
+    border:3px solid white;
+    z-index:1100;
+    display:none;
+}
+
+.target{
+    width:60px;
+    height:60px;
+    background:radial-gradient(circle,#fff,#00d2ff);
+    border-radius:50%;
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    display:none;
+    box-shadow:0 0 40px #00d2ff;
+}
+
+#score-board{
+    position:fixed;
+    bottom:40px;
+    width:100%;
+    text-align:center;
+    font-size:2.2rem;
+    display:none;
+}
+
+button{
+    padding:15px 35px;
+    font-size:1.2rem;
+    background:#00d2ff;
+    border:none;
+    border-radius:50px;
+    cursor:pointer;
+    font-weight:bold;
+}
+</style>
 </head>
+
 <body>
 
 <div id="overlay">
-    <h1 id="main-title">靈魂頻率掃描</h1>
-    <p id="sub-msg">請盯著紅點點擊以同步頻率</p>
-    <button id="startBtn" onclick="initWebGazer()">開始同步</button>
+    <h1 id="main-title">專注力校準測試</h1>
+    <p id="sub-msg">請先把臉對準鏡頭，再點擊開始</p>
+    <button id="startBtn" onclick="prepareCalibration()">開始測試</button>
 </div>
 
 <div id="calib-pts">
@@ -31,108 +100,204 @@
 </div>
 
 <div class="target" id="mainTarget"></div>
+
+<canvas id="heatmapThumb"
+style="position:absolute;right:8%;top:50%;transform:translateY(-50%);
+width:220px;height:160px;border-radius:12px;
+box-shadow:0 0 20px rgba(255,80,80,.4);display:none;z-index:2100;">
+</canvas>
+
 <div id="score-board">
     專注能量: <span id="scoreText">100</span>%
-    <div id="hint-text">正在讀取視網膜特徵...</div>
 </div>
 
 <script>
-    let score = 100;
-    let calibCount = 0;
-    let smoothX = 0, smoothY = 0;
-    const lerpFactor = 0.15; // 數值越小越平滑，但延遲感會越重
-    let isGameRunning = false;
-    let perfLog = { focusHits: 0, totalTicks: 0, strayCount: 0 };
+let score=100;
+let calibCount=0;
+let isGameRunning=false;
+let gazeTrail=[];
+let smoothX=0,smoothY=0;
 
-    function initWebGazer() {
-        document.getElementById('startBtn').style.display = 'none';
-        webgazer.setRegression('ridge').setGazeListener((data) => {
-            if (data) {
-                // 加權平滑處理：當前值 = 舊值 * 0.85 + 新值 * 0.15
-                smoothX = smoothX * (1 - lerpFactor) + data.x * lerpFactor;
-                smoothY = smoothY * (1 - lerpFactor) + data.y * lerpFactor;
-            }
-        }).begin();
-        webgazer.showVideoPreview(true).showPredictionPoints(true);
-        document.querySelectorAll('.calib-point').forEach(p => p.style.display = 'block');
+// ⭐ 模式切換（你之後可改）
+const TARGET_MODE="center"; // center / random
+const STRICTNESS=1.0;
+
+webgazer.showVideoPreview(true);
+webgazer.showPredictionPoints(true);
+
+window.addEventListener("load",()=>{
+    webgazer
+      .setRegression('ridge')
+      .setGazeListener((data)=>{
+        if(!data) return;
+        smoothX=data.x;
+        smoothY=data.y;
+        if(isGameRunning) gazeTrail.push({x:smoothX,y:smoothY});
+      })
+      .begin();
+
+    webgazer.showVideoPreview(true);
+    webgazer.showPredictionPoints(true);
+});
+
+// ⭐⭐⭐ 進入校正
+function prepareCalibration(){
+    resetAll();
+    document.getElementById('startBtn').style.display='none';
+    document.querySelectorAll('.calib-point').forEach(p=>{
+        p.style.display='block';
+    });
+}
+
+// ⭐⭐⭐ 校正點擊
+function calibrate(el){
+    if(el.dataset.done==="1") return;
+
+    el.dataset.done="1";
+    el.style.background="#2ed573";
+    calibCount++;
+
+    setTimeout(()=>el.style.display="none",200);
+
+    if(calibCount>=5){
+        startGame();
+    }
+}
+
+// ⭐⭐⭐ 開始遊戲
+function startGame(){
+    isGameRunning=true;
+    score=100;
+    gazeTrail=[];
+
+    // 遊戲中隱藏鏡頭
+    webgazer.showVideoPreview(false);
+    webgazer.showPredictionPoints(true);
+
+    document.getElementById("overlay").style.display="none";
+    document.getElementById("score-board").style.display="block";
+    document.getElementById("mainTarget").style.display="block";
+
+    if(TARGET_MODE==="random"){
+        moveTargetLoop(); // ⭐ 已保留舊功能
     }
 
-    function calibrate(el) {
-        el.style.display = "none";
-        calibCount++;
-        if (calibCount >= 5) {
-            webgazer.removeMouseEventListeners();
-            document.getElementById('overlay').style.display = 'none';
-            startGame();
+    startFocusScoring();
+}
+
+// ⭐⭐⭐ 原版隨機（保留）
+function moveTargetLoop(){
+    const target=document.getElementById("mainTarget");
+    function move(){
+        if(!isGameRunning) return;
+        target.style.left=(10+Math.random()*80)+"%";
+        target.style.top=(15+Math.random()*70)+"%";
+        setTimeout(move,1800);
+    }
+    move();
+}
+
+// ⭐⭐⭐ 評分
+function startFocusScoring(){
+    const target=document.getElementById("mainTarget");
+
+    const timer=setInterval(()=>{
+        if(!isGameRunning){
+            clearInterval(timer);
+            return;
         }
-    }
 
-    function startGame() {
-        document.getElementById('mainTarget').style.display = 'block';
-        document.getElementById('score-board').style.display = 'block';
-        isGameRunning = true;
+        const rect=target.getBoundingClientRect();
+        const cx=rect.left+rect.width/2;
+        const cy=rect.top+rect.height/2;
 
-        const loop = setInterval(() => {
-            if (!isGameRunning) return clearInterval(loop);
-            
-            perfLog.totalTicks++;
-            const target = document.getElementById('mainTarget').getBoundingClientRect();
-            const tx = target.left + 30, ty = target.top + 30;
-            const dist = Math.sqrt(Math.pow(smoothX - tx, 2) + Math.pow(smoothY - ty, 2));
+        const dx=smoothX-cx;
+        const dy=smoothY-cy;
+        const dist=Math.sqrt(dx*dx+dy*dy);
 
-            const hint = document.getElementById('hint-text');
-            const targetEl = document.getElementById('mainTarget');
-
-            if (dist < 150) { // 判定成功
-                score = Math.min(100, score + 0.4);
-                perfLog.focusHits++;
-                hint.innerText = "✨ 頻率同步中 - 狀態穩定";
-                hint.style.color = "#00ff00";
-                targetEl.style.transform = "translate(-50%, -50%) scale(1.1)";
-            } else { // 判定失敗
-                score = Math.max(0, score - 0.8);
-                perfLog.strayCount++;
-                hint.innerText = "⚠️ 能量擴散 - 請對準中心";
-                hint.style.color = "#ff4757";
-                targetEl.style.transform = "translate(-50%, -50%) scale(0.9)";
-            }
-            document.getElementById('scoreText').innerText = Math.floor(score);
-        }, 100);
-
-        setTimeout(finishGame, 20000);
-    }
-
-    function finishGame() {
-        isGameRunning = false;
-        webgazer.pause();
-        
-        // --- 根據狀態計算結果 ---
-        let title = "";
-        let desc = "";
-        const hitRate = perfLog.focusHits / perfLog.totalTicks;
-
-        if (hitRate > 0.85) {
-            title = "【 絕對領域 】";
-            desc = "你的專注力如同雷射，靈魂特質：極度純粹。";
-        } else if (hitRate > 0.6) {
-            title = "【 穩定航行者 】";
-            desc = "你有良好的控制力，靈魂特質：理性且穩健。";
-        } else if (perfLog.strayCount > perfLog.totalTicks * 0.5) {
-            title = "【 自由靈魂 】";
-            desc = "你的視線充滿好奇，靈魂特質：富有創造力但易分心。";
-        } else {
-            title = "【 混沌觀測者 】";
-            desc = "頻率雜亂無章，建議先休息一下再回來。";
+        if(dist>120){
+            score-=0.3*STRICTNESS;
         }
 
-        document.getElementById('overlay').style.display = 'flex';
-        document.getElementById('main-title').innerText = title;
-        document.getElementById('sub-msg').innerHTML = `${desc}<br><br>最終能量：${Math.floor(score)}%`;
-        document.getElementById('startBtn').style.display = 'block';
-        document.getElementById('startBtn').innerText = "下一位觀測者";
-        document.getElementById('startBtn').onclick = () => location.reload();
-    }
+        if(score<0) score=0;
+        document.getElementById("scoreText").innerText=Math.floor(score);
+
+        if(score<=0 || gazeTrail.length>500){
+            finishGame();
+        }
+
+    },120);
+}
+
+// ⭐⭐⭐ 結束
+function finishGame(){
+    isGameRunning=false;
+
+    drawHeatmapThumb();
+
+    const rank=getRank(score);
+
+    document.getElementById('overlay').style.display='flex';
+    document.getElementById('main-title').innerHTML=
+        `<div class="big-grade">${rank.grade}</div>`;
+
+    document.getElementById('sub-msg').innerHTML=
+        `最終專注度：${Math.floor(score)}%<br>${rank.msg}
+         <div class="animal">${rank.animal}</div>`;
+
+    document.getElementById('startBtn').style.display='inline-block';
+    document.getElementById('startBtn').innerText='再玩一次';
+
+    // 回到可對臉狀態
+    webgazer.showVideoPreview(true);
+    webgazer.showPredictionPoints(true);
+}
+
+// ⭐⭐⭐ Reset
+function resetAll(){
+    score=100;
+    calibCount=0;
+    isGameRunning=false;
+    gazeTrail=[];
+
+    document.querySelectorAll('.calib-point').forEach(p=>{
+        p.dataset.done="0";
+        p.style.display="none";
+        p.style.background="#ff4757";
+    });
+
+    document.getElementById("heatmapThumb").style.display="none";
+    document.getElementById("scoreText").innerText="100";
+}
+
+// ⭐⭐⭐ 等級
+function getRank(percent){
+    if(percent>=90) return {grade:"S",animal:"🦅 老鷹",msg:"你的專注力像老鷹一樣銳利！"};
+    if(percent>=80) return {grade:"A",animal:"🐆 獵豹",msg:"你的專注力非常敏捷！"};
+    if(percent>=70) return {grade:"B",animal:"🐱 貓咪",msg:"你的專注力穩定不錯！"};
+    if(percent>=60) return {grade:"C",animal:"🐢 樹懶",msg:"你的專注力偏慢，需要練習！"};
+    return {grade:"D",animal:"🐠 金魚",msg:"注意力容易飄走喔！"};
+}
+
+// ⭐⭐⭐ 熱點
+function drawHeatmapThumb(){
+    const canvas=document.getElementById("heatmapThumb");
+    const ctx=canvas.getContext("2d");
+    canvas.width=220;
+    canvas.height=160;
+    ctx.clearRect(0,0,220,160);
+
+    gazeTrail.forEach(p=>{
+        const x=p.x/window.innerWidth*220;
+        const y=p.y/window.innerHeight*160;
+        ctx.fillStyle="rgba(255,80,80,0.25)";
+        ctx.beginPath();
+        ctx.arc(x,y,6,0,Math.PI*2);
+        ctx.fill();
+    });
+
+    canvas.style.display="block";
+}
 </script>
 </body>
 </html>
-
